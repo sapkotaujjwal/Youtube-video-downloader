@@ -23,6 +23,15 @@ def format_duration(seconds):
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
 
+def seconds_to_hhmmss(sec):
+    """Convert seconds to HH:MM:SS for yt-dlp download_sections"""
+    h = sec // 3600
+    m = (sec % 3600) // 60
+    s = sec % 60
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
 def get_video_info(url):
     """Fetch all available video information and formats"""
     print("\n[*] Fetching video information...")
@@ -59,8 +68,6 @@ def display_formats(info):
     print("="*70)
     
     formats = info.get('formats', [])
-    
-    # Filter and organize formats
     video_formats = []
     audio_formats = []
     
@@ -73,38 +80,20 @@ def display_formats(info):
         acodec = f.get('acodec', 'none')
         fps = f.get('fps', 0)
         
-        if vcodec != 'none' and acodec != 'none':  # Video with audio
-            video_formats.append({
-                'id': format_id,
-                'ext': ext,
-                'resolution': resolution,
-                'size': filesize,
-                'fps': fps,
-                'type': 'video+audio'
-            })
+        if vcodec != 'none' and acodec != 'none':  # Video+Audio
+            video_formats.append({'id': format_id, 'ext': ext, 'resolution': resolution,
+                                  'size': filesize, 'fps': fps, 'type': 'video+audio'})
         elif vcodec != 'none':  # Video only
-            video_formats.append({
-                'id': format_id,
-                'ext': ext,
-                'resolution': resolution,
-                'size': filesize,
-                'fps': fps,
-                'type': 'video only'
-            })
+            video_formats.append({'id': format_id, 'ext': ext, 'resolution': resolution,
+                                  'size': filesize, 'fps': fps, 'type': 'video only'})
         elif acodec != 'none':  # Audio only
-            audio_formats.append({
-                'id': format_id,
-                'ext': ext,
-                'resolution': resolution,
-                'size': filesize,
-                'type': 'audio only'
-            })
+            audio_formats.append({'id': format_id, 'ext': ext, 'resolution': resolution,
+                                  'size': filesize, 'type': 'audio only'})
     
     # Display video formats
     print("\n[VIDEO FORMATS]")
     print(f"{'No.':<5} {'Format ID':<12} {'Quality':<20} {'Size':<12} {'Type':<15}")
     print("-"*70)
-    
     for idx, fmt in enumerate(video_formats, 1):
         size_str = format_filesize(fmt['size']) if fmt['size'] > 0 else 'Unknown'
         fps_str = f"{fmt['fps']}fps" if fmt['fps'] else ""
@@ -129,26 +118,23 @@ def get_time_input(prompt, max_duration):
         time_str = input(prompt).strip()
         if not time_str:
             return None
-        
         try:
             parts = time_str.split(':')
-            if len(parts) == 2:  # MM:SS
+            if len(parts) == 2:
                 minutes, seconds = map(int, parts)
                 total_seconds = minutes * 60 + seconds
-            elif len(parts) == 3:  # HH:MM:SS
+            elif len(parts) == 3:
                 hours, minutes, seconds = map(int, parts)
                 total_seconds = hours * 3600 + minutes * 60 + seconds
             else:
                 print("[ERROR] Invalid format. Use MM:SS or HH:MM:SS")
                 continue
-            
             if total_seconds > max_duration:
                 print(f"[ERROR] Time exceeds video duration ({format_duration(max_duration)})")
                 continue
-            
             return total_seconds
         except ValueError:
-            print("[ERROR] Invalid time format. Use numbers only (e.g., 01:30 or 00:01:30)")
+            print("[ERROR] Invalid time format. Use numbers only (e.g., 01:30)")
 
 def progress_hook(d):
     """Display download progress"""
@@ -161,7 +147,7 @@ def progress_hook(d):
         print("\n[*] Download finished, processing...")
 
 def download_video(url, format_id, output_name, start_time=None, end_time=None):
-    """Download video with specified parameters"""
+    """Download video with specified parameters using download_sections for partial downloads"""
     output_path = 'downloads'
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -172,15 +158,16 @@ def download_video(url, format_id, output_name, start_time=None, end_time=None):
         'progress_hooks': [progress_hook],
     }
     
-    # Add time range if specified
+    # Partial download using yt-dlp download_sections
     if start_time is not None or end_time is not None:
-        postprocessor_args = []
+        section = ""
         if start_time is not None:
-            postprocessor_args.extend(['-ss', str(start_time)])
+            section += seconds_to_hhmmss(start_time)
+        section += "-"
         if end_time is not None:
-            postprocessor_args.extend(['-to', str(end_time)])
-        
-        ydl_opts['postprocessor_args'] = postprocessor_args
+            section += seconds_to_hhmmss(end_time)
+        ydl_opts['download_sections'] = [f"*{section}"]
+        # Optional: ensure mp4 output
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegVideoConvertor',
             'preferedformat': 'mp4',
@@ -202,24 +189,18 @@ def main():
     print(" "*20 + "YOUTUBE VIDEO DOWNLOADER")
     print("="*70)
     
-    # Step 1: Get video URL
     url = input("\n[1] Enter YouTube video URL: ").strip()
     if not url:
         print("[ERROR] No URL provided!")
         return
     
-    # Step 2: Fetch video info
     info = get_video_info(url)
     if not info:
         return
     
-    # Step 3: Display video information
     display_video_info(info)
-    
-    # Step 4: Display available formats
     formats = display_formats(info)
     
-    # Step 5: Select quality
     while True:
         try:
             choice = input("\n[2] Select format number (or press Enter for best quality): ").strip()
@@ -235,7 +216,6 @@ def main():
         except ValueError:
             print("[ERROR] Please enter a valid number")
     
-    # Step 6: Select time range
     duration = info.get('duration', 0)
     print(f"\n[3] Video duration: {format_duration(duration)}")
     print("     Download options:")
@@ -243,7 +223,6 @@ def main():
     print("     2. Custom time range")
     
     time_choice = input("     Select option (1 or 2): ").strip()
-    
     start_time = None
     end_time = None
     
@@ -251,21 +230,15 @@ def main():
         print("\n     Enter time in MM:SS or HH:MM:SS format (or press Enter to skip)")
         start_time = get_time_input("     Start time (e.g., 01:30): ", duration)
         end_time = get_time_input("     End time (e.g., 05:45): ", duration)
-        
         if start_time and end_time and start_time >= end_time:
             print("[ERROR] Start time must be before end time!")
             return
     
-    # Step 7: Get output filename
     default_title = info.get('title', 'video')
-    # Clean filename
     default_title = "".join(c for c in default_title if c.isalnum() or c in (' ', '-', '_')).strip()
-    
-    print(f"\n[4] Default filename: {default_title}")
-    custom_name = input("     Enter custom filename (or press Enter to use default): ").strip()
+    custom_name = input(f"\n[4] Default filename: {default_title}\n     Enter custom filename (or press Enter to use default): ").strip()
     output_name = custom_name if custom_name else default_title
     
-    # Step 8: Confirm and download
     print("\n" + "="*70)
     print("DOWNLOAD SUMMARY")
     print("="*70)
@@ -281,15 +254,6 @@ def main():
     print("="*70)
     
     download_video(url, format_id, output_name, start_time, end_time)
-    # confirm = input("\nProceed with download? (y/n): ").strip().lower()
-    # if confirm == 'y':
-    # else:
-    #     print("[*] Download cancelled.")
-
-
-
-
-    
 
 if __name__ == "__main__":
     try:
